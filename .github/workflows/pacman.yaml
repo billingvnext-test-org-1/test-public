@@ -1,0 +1,87 @@
+name: Pac-Man
+# Pac-Man is GitHub Actions workflow that generates usage of all existing metered products.
+# The usage is attributed to the owner of the test repository where Pac-Man is run.
+#
+# Usage
+# 1. Copy pac-man.yml (this file) into folder .github/workflows in your test repository
+#
+# Steps 2 and 3 are required for generating Codespaces and Packages usage. If you need only
+# Actions and Shared Storage usage, you can skip these steps.
+#
+# 2. Create personal access token at https://github.com/settings/tokens with scopes "codespace" and "write:packages. Make sure you select a classic and not a beta token."
+# 3. Save the token as Actions secret "PACMAN_TOKEN" in your test repository
+#
+# Save the token for later. You will be prompted to enter it when executing step 6.
+#
+# 4. Run Pac-Man by clicking the "Run workflow" button in the Actions tab of your test repository 🚀
+#
+# Steps 5 is required only for generating Packages bandwidth usage.
+#
+# 5. Follow the Actions Summary instuctions to download and execute pac-man.sh
+#
+# You can customize Pac-Man by changing the values below.
+on:
+  # Creates "Run workflow" button in the workflow tab
+  workflow_dispatch:
+  # Uncomment if you want Pac-Man to run on push
+  # push:
+  # Uncomment if you want Pac-Man to run on a periodic schedule. This is useful when trying to hit spending limits.
+  # schedule:
+    # - cron: "0 */2 * * *"
+env:
+  # The number of minutes each Action and Codespace should run
+  MINUTES: 10
+  # The number of runs of each Actions and Codespaces machine spec. Increase if trying to hit entitlements quickly.
+  # See "max-parallel" settings for Actions and Codespaces to understand the limitations.
+  ITERATIONS: 1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+jobs:
+  set_variables:
+    runs-on: ubuntu-latest
+    outputs:
+      codespaces_machine_names: ${{ steps.codespaces.outputs.machine_names }}
+      iterator: ${{ steps.iterator.outputs.iterator }}
+    steps:
+      # Available machine names can differ for each user/organization. Use API to get the current list.
+      - name: Codespaces
+        id: codespaces
+        # Fails if PACMAN_TOKEN not set / not valid. Codespaces won't be run.
+        continue-on-error: true 
+        run: |
+          response=$(gh api /repos/${{ github.repository }}/codespaces/machines)
+          echo "Available codespaces machine names:"
+          echo $response
+          machine_names=$(echo $response | jq "[.machines | .[] | .name]" -c)
+          echo "::set-output name=machine_names::$machine_names" 
+        env:
+          GITHUB_TOKEN: ${{secrets.PACMAN_TOKEN}}
+      - name: Iterator
+        id: iterator 
+        run: |
+          iterator=$(node -e "console.log(JSON.stringify([...Array(${{ env.ITERATIONS }}).keys()]))")
+          echo $iterator
+          echo "::set-output name=iterator::$iterator"
+  actions:
+    runs-on: ${{ matrix.os }}
+    needs:
+      - set_variables
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        i: ${{ fromJSON(needs.set_variables.outputs.iterator) }}
+      fail-fast: false
+      # Increase if using ITERATIONS > 3
+      # https://docs.github.com/en/actions/learn-github-actions/usage-limits-billing-and-administration#usage-limits
+      max-parallel: 10
+    steps:
+      - name: Generate large artifact
+        shell: pwsh
+        run: |
+          [io.file]::Create("large-artifact.txt").SetLength(50GB).Close
+      - uses: actions/upload-artifact@v3
+        with:
+          name: large-artifact-${{ matrix.os }}-${{ matrix.i }}.txt
+          path: large-artifact.txt
+      - run: echo "😴 Sleeping for ${{ env.MINUTES }} minute(s) to generate more Actions usage"
+      - run: sleep $((${{ env.MINUTES }} ))
